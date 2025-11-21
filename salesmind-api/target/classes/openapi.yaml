@@ -1,0 +1,1490 @@
+openapi: 3.0.3
+info:
+  title: SalesMind API
+  description: |
+    API REST para gerenciamento de vendas e análise de ligações com IA.
+    
+    ## Autenticação
+    A maioria dos endpoints requer autenticação JWT via Bearer token.
+    
+    1. Faça signup em `/api/signup` ou login em `/api/auth/login`
+    2. Use o `accessToken` retornado no header: `Authorization: Bearer {token}`
+    
+    ## Recursos
+    - **IA**: Transcrição e análise automática de áudio
+    - **Dashboard**: Métricas de performance de vendas
+    - **JWT**: Sistema de autenticação com tokens de acesso e renovação
+    ```
+    
+  version: 1.0.0
+  contact:
+    name: FIAP - Equipe SalesMind
+
+servers:
+  - url: http://localhost:8080
+    description: Servidor de desenvolvimento (configurar URL conforme ambiente)
+
+tags:
+  - name: Health
+    description: Verificação de saúde do servidor
+  - name: Auth
+    description: Autenticação e gerenciamento de tokens JWT
+  - name: Signup
+    description: Cadastro de novas empresas
+  - name: Empresas
+    description: Gerenciamento de empresas
+  - name: Usuários
+    description: Gerenciamento de usuários (vendedores, gerentes, admins)
+  - name: Clientes
+    description: Gerenciamento de clientes
+  - name: Gravações
+    description: Upload e gerenciamento de gravações de ligações
+  - name: Feedbacks
+    description: Análise de IA das gravações
+  - name: Dashboard
+    description: Métricas e estatísticas
+
+security:
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Verifica status do servidor
+      description: Endpoint público para health check
+      security: []
+      responses:
+        '200':
+          description: Servidor funcionando normalmente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  service:
+                    type: string
+                    example: SalesMind API
+
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Autenticar usuário
+      description: Retorna tokens JWT (access e refresh) após validar credenciais
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login bem-sucedido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Credenciais inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Renovar access token
+      description: Gera novo access token usando refresh token válido
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token renovado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Refresh token inválido ou expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/signup:
+    post:
+      tags:
+        - Signup
+      summary: Cadastrar nova empresa
+      description: |
+        Cria empresa e usuário administrador inicial em uma única operação **transacional**.
+        
+        **Transação**: Se a criação do admin falhar, a empresa é automaticamente revertida (rollback).
+        
+        **Validações**:
+        - Email não pode estar duplicado
+        - CNPJ não pode estar duplicado
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupEmpresaRequest'
+      responses:
+        '201':
+          description: Empresa criada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  empresa:
+                    $ref: '#/components/schemas/Empresa'
+                  adminUser:
+                    $ref: '#/components/schemas/Usuario'
+                  message:
+                    type: string
+                    example: Empresa criada com sucesso! Use o email do administrador para fazer login.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email ou CNPJ já cadastrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/empresas:
+    get:
+      tags:
+        - Empresas
+      summary: Listar empresas
+      description: Retorna a empresa do usuário autenticado (apenas a própria)
+      responses:
+        '200':
+          description: Lista com a empresa atual
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Empresa'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      tags:
+        - Empresas
+      summary: Criar nova empresa
+      description: |
+        Cadastra uma nova empresa no sistema.
+        
+        **Permissão necessária**: Apenas usuários ADMIN podem criar empresas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmpresaRequest'
+      responses:
+        '201':
+          description: Empresa criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empresa'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Acesso negado - Apenas administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: CNPJ já cadastrado no sistema
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/empresas/{id}:
+    get:
+      tags:
+        - Empresas
+      summary: Buscar empresa por ID
+      description: Retorna dados da empresa (apenas a própria)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Empresa encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empresa'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - Empresas
+      summary: Atualizar empresa (apenas ADMIN)
+      description: |
+        Atualiza dados da empresa autenticada.
+        
+        **Permissão necessária**: Apenas usuários ADMIN podem atualizar a empresa.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmpresaRequest'
+      responses:
+        '200':
+          description: Empresa atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Empresa'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Acesso negado - Apenas administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: CNPJ já cadastrado no sistema
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    
+    delete:
+      tags:
+        - Empresas
+      summary: Deletar empresa (apenas ADMIN)
+      description: |
+        Remove a empresa do sistema.
+        
+        **Permissão necessária**: Apenas usuários ADMIN podem deletar a empresa.
+        
+        **Validações**:
+        - Não é possível deletar empresa com usuários, clientes ou gravações associados
+        
+        **Atenção**: Esta operação é irreversível.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Empresa deletada com sucesso
+        '403':
+          description: Acesso negado - Apenas administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Não é possível excluir - existem dependências (usuários, clientes ou gravações)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/usuarios:
+    get:
+      tags:
+        - Usuários
+      summary: Listar usuários da empresa
+      description: Retorna todos os usuários da empresa autenticada
+      responses:
+        '200':
+          description: Lista de usuários
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Usuario'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      tags:
+        - Usuários
+      summary: Criar novo usuário
+      description: Cadastra usuário (VENDEDOR ou GERENTE). Requer permissão de ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUsuarioRequest'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Apenas ADMINs podem criar usuários
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/usuarios/{id}:
+    get:
+      tags:
+        - Usuários
+      summary: Buscar usuário por ID
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Usuário encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - Usuários
+      summary: Atualizar usuário
+      description: |
+        Atualiza dados do usuário.
+        
+        **Restrições**:
+        - Apenas ADMIN pode alterar o campo `funcao`
+        - Não é possível alterar para função ADMIN
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUsuarioRequest'
+      responses:
+        '200':
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Acesso negado - Usuário de outra empresa ou tentativa de alterar função sem permissão
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - Usuários
+      summary: Deletar usuário (apenas ADMIN)
+      description: |
+        Remove usuário do sistema.
+        
+        **Permissão necessária**: Apenas ADMIN pode deletar usuários.
+        
+        **Validações**:
+        - Não é possível deletar o único usuário ADMIN da empresa
+        - Não é possível deletar usuário com gravações associadas (409 Conflict)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Usuário deletado com sucesso
+        '400':
+          description: Não é possível deletar o ADMIN da empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Acesso negado - Apenas administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Não é possível excluir - existem gravações associadas ao usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/usuarios/{id}/stats:
+    get:
+      tags:
+        - Usuários
+      summary: Estatísticas do usuário
+      description: Retorna métricas de vendas do usuário (total de gravações e vendas fechadas)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Estatísticas do usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioStatsResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/clientes:
+    get:
+      tags:
+        - Clientes
+      summary: Listar clientes da empresa
+      description: Retorna todos os clientes da empresa autenticada
+      responses:
+        '200':
+          description: Lista de clientes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cliente'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      tags:
+        - Clientes
+      summary: Criar novo cliente
+      description: Cadastra cliente vinculado à empresa autenticada
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClienteRequest'
+      responses:
+        '201':
+          description: Cliente criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cliente'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/clientes/{id}:
+    get:
+      tags:
+        - Clientes
+      summary: Buscar cliente por ID
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Cliente encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cliente'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - Clientes
+      summary: Atualizar cliente
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClienteRequest'
+      responses:
+        '200':
+          description: Cliente atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Cliente'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - Clientes
+      summary: Deletar cliente (ADMIN/GERENTE)
+      description: |
+        Remove cliente do sistema.
+        
+        **Permissão necessária**: Apenas ADMIN ou GERENTE podem deletar clientes.
+        
+        **Validações**:
+        - Não é possível deletar cliente com gravações associadas (409 Conflict)
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '204':
+          description: Cliente deletado com sucesso
+        '403':
+          description: Acesso negado - Apenas ADMIN ou GERENTE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Não é possível excluir - existem gravações associadas ao cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gravacoes:
+    get:
+      tags:
+        - Gravações
+      summary: Listar gravações do usuário
+      description: Retorna todas as gravações do usuário autenticado
+      responses:
+        '200':
+          description: Lista de gravações
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GravacaoCallDTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    
+    post:
+      tags:
+        - Gravações
+      summary: Criar gravação (sem áudio)
+      description: |
+        Cria registro de gravação sem upload de áudio (uso avançado).
+        Para upload de áudio use POST /api/gravacoes/upload
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGravacaoRequest'
+      responses:
+        '201':
+          description: Gravação criada (retorna DTO)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GravacaoCallDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Acesso negado - Cliente pertence a outra empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Cliente não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gravacoes/{id}:
+    get:
+      tags:
+        - Gravações
+      summary: Buscar gravação por ID
+      description: Retorna gravação com transcrição, resumo e feedback da IA
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Gravação encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GravacaoCallDTO'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - Gravações
+      summary: Atualizar gravação
+      description: |
+        Atualiza informações da gravação.
+        
+        **Campos permitidos**:
+        - `statusVenda`: Status da negociação
+        - `transcricao`: Transcrição (normalmente gerada pela IA)
+        - `resumoIA`: Resumo (normalmente gerado pela IA)
+        
+        **Restrições**: Apenas o dono da gravação pode atualizá-la.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGravacaoRequest'
+      responses:
+        '200':
+          description: Gravação atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GravacaoCallDTO'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/gravacoes/upload:
+    post:
+      tags:
+        - Gravações
+      summary: Upload de áudio de ligação
+      description: |
+        Faz upload de arquivo de áudio (MP3, WAV, M4A, OGG, FLAC) para processamento com IA.
+        O processamento é assíncrono - use GET /api/gravacoes/{id} para acompanhar o status.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - idCliente
+                - audioFile
+              properties:
+                idCliente:
+                  type: integer
+                  format: int64
+                  description: ID do cliente relacionado à ligação
+                  example: 123
+                audioFile:
+                  type: string
+                  format: binary
+                  description: Arquivo de áudio da ligação
+      responses:
+        '201':
+          description: Upload realizado, processamento iniciado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    enum: [UPLOADING, PROCESSANDO, CONCLUIDO, ERRO]
+                    example: UPLOADING
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Cliente não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/gravacoes/{id}/status:
+    get:
+      tags:
+        - Gravações
+      summary: Verificar status do processamento
+      description: Consulta o status atual do processamento da gravação
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Status da gravação
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GravacaoStatusResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/feedbacks:
+    get:
+      tags:
+        - Feedbacks
+      summary: Listar todos os feedbacks da empresa
+      description: |
+        Retorna todos os feedbacks da empresa autenticada.
+        
+        **Permissão necessária**: Apenas usuários com função ADMIN podem acessar.
+      responses:
+        '200':
+          description: Lista de feedbacks da empresa
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FeedbackIADTO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Acesso negado - Apenas administradores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/feedbacks/{id}:
+    get:
+      tags:
+        - Feedbacks
+      summary: Buscar feedback por ID
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Feedback encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackIADTO'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/feedbacks/gravacao/{id}:
+    get:
+      tags:
+        - Feedbacks
+      summary: Buscar feedback por ID da gravação
+      description: Retorna o feedback associado a uma gravação específica
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID da gravação
+      responses:
+        '200':
+          description: Feedback encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackIADTO'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Gravação ou feedback não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dashboard/empresa/{id}:
+    get:
+      tags:
+        - Dashboard
+      summary: Dashboard da empresa (apenas ADMIN)
+      description: |
+        Retorna métricas agregadas da empresa (total de gravações, clientes e taxa de conversão).
+        
+        **Permissão necessária**: Apenas usuários com função ADMIN podem acessar.
+        
+        As métricas são calculadas apenas para a empresa do usuário autenticado.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID da empresa (deve corresponder à empresa do usuário autenticado)
+      responses:
+        '200':
+          description: Dados do dashboard da empresa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmpresaDashboardResponse'
+        '403':
+          description: Acesso negado - Apenas administradores ou empresa diferente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/dashboard/clientes/{id}:
+    get:
+      tags:
+        - Dashboard
+      summary: Dashboard do cliente
+      description: Retorna métricas de um cliente específico
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID do cliente
+      responses:
+        '200':
+          description: Dados do cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClienteDashboardResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtido via /api/auth/login
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: ID do recurso
+
+  # Respostas padronizadas
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Não autenticado - Token JWT ausente ou inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Acesso negado - Recurso pertence a outra empresa/usuário
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  # Schemas modularizados - organizados por domínio
+  schemas:
+    # Auth
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - senha
+      properties:
+        email:
+          type: string
+          format: email
+          example: vendedor@empresa.com
+        senha:
+          type: string
+          format: password
+          example: senha123
+    
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiJ9...
+    
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: Token de acesso
+        refreshToken:
+          type: string
+          description: Token de renovação
+        tokenType:
+          type: string
+          example: Bearer
+        expiresIn:
+          type: integer
+          format: int64
+          description: Tempo de expiração em milissegundos
+          example: 3600000
+        user:
+          type: object
+          properties:
+            id:
+              type: integer
+              format: int64
+            nome:
+              type: string
+            email:
+              type: string
+            funcao:
+              type: string
+              enum: [VENDEDOR, GERENTE, ADMIN]
+            empresaId:
+              type: integer
+              format: int64
+    
+    # Empresa
+    SignupEmpresaRequest:
+      type: object
+      required:
+        - nomeEmpresa
+        - cnpj
+        - email
+        - senha
+      properties:
+        nomeEmpresa:
+          type: string
+          example: TechSales Corp
+        cnpj:
+          type: string
+          example: "12345678000190"
+        email:
+          type: string
+          format: email
+          example: admin@techsales.com
+          description: Email do administrador inicial
+        senha:
+          type: string
+          format: password
+          description: Senha do administrador inicial
+    
+    CreateEmpresaRequest:
+      type: object
+      required:
+        - nomeEmpresa
+        - cnpj
+      properties:
+        nomeEmpresa:
+          type: string
+          example: TechSales Corp
+        cnpj:
+          type: string
+          example: "12345678000190"
+    
+    UpdateEmpresaRequest:
+      type: object
+      properties:
+        nomeEmpresa:
+          type: string
+        cnpj:
+          type: string
+      description: Todos os campos são opcionais - envie apenas os que deseja atualizar
+    
+    Empresa:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        nomeEmpresa:
+          type: string
+          example: TechSales Corp
+        cnpj:
+          type: string
+          example: "12345678000190"
+        criadoEm:
+          type: string
+          format: date-time
+          example: "2025-01-01T08:00:00Z"
+    
+    # Usuario
+    CreateUsuarioRequest:
+      type: object
+      required:
+        - nome
+        - email
+        - senha
+        - funcao
+      properties:
+        nome:
+          type: string
+          example: João Silva
+        email:
+          type: string
+          format: email
+          example: joao@empresa.com
+        senha:
+          type: string
+          format: password
+        funcao:
+          type: string
+          enum: [VENDEDOR, GERENTE, ADMIN]
+          example: VENDEDOR
+          description: Não é permitido criar outro ADMIN via API
+    
+    UpdateUsuarioRequest:
+      type: object
+      properties:
+        nome:
+          type: string
+        email:
+          type: string
+          format: email
+        funcao:
+          type: string
+          enum: [VENDEDOR, GERENTE, ADMIN]
+          description: Apenas ADMIN pode alterar este campo. Não é possível alterar para ADMIN.
+      description: Todos os campos são opcionais - envie apenas os que deseja atualizar
+    
+    Usuario:
+      type: object
+      description: Representa um usuário do sistema.
+      properties:
+        id:
+          type: integer
+          format: int64
+        nome:
+          type: string
+          example: João Silva
+        email:
+          type: string
+          format: email
+          example: joao@empresa.com
+        funcao:
+          type: string
+          enum: [VENDEDOR, GERENTE, ADMIN]
+          example: VENDEDOR
+        idEmpresa:
+          type: integer
+          format: int64
+        criadoEm:
+          type: string
+          format: date-time
+        atualizadoEm:
+          type: string
+          format: date-time
+    
+    UsuarioStatsResponse:
+      type: object
+      properties:
+        idUsuario:
+          type: integer
+          format: int64
+        vendasFechadas:
+          type: integer
+          format: int64
+          description: Total de vendas fechadas pelo usuário
+    
+    # Cliente
+    CreateClienteRequest:
+      type: object
+      required:
+        - nome
+      properties:
+        nome:
+          type: string
+          example: Maria Santos
+        cpfCnpj:
+          type: string
+          example: "12345678901"
+        telefone:
+          type: string
+          example: "11987654321"
+        email:
+          type: string
+          format: email
+          example: maria@cliente.com
+        segmento:
+          type: string
+          example: Tecnologia
+    
+    UpdateClienteRequest:
+      type: object
+      properties:
+        nome:
+          type: string
+        cpfCnpj:
+          type: string
+        telefone:
+          type: string
+        email:
+          type: string
+          format: email
+        segmento:
+          type: string
+      description: Todos os campos são opcionais - envie apenas os que deseja atualizar
+    
+    Cliente:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        nome:
+          type: string
+          example: Maria Santos
+        cpfCnpj:
+          type: string
+          example: "12345678901"
+        telefone:
+          type: string
+          example: "11987654321"
+        email:
+          type: string
+          format: email
+          example: maria@cliente.com
+        segmento:
+          type: string
+          example: Tecnologia
+        idEmpresa:
+          type: integer
+          format: int64
+          example: 1
+        criadoEm:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+        atualizadoEm:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:30:00Z"
+    
+    ClienteDashboardResponse:
+      type: object
+      properties:
+        idCliente:
+          type: integer
+          format: int64
+        totalGravacoes:
+          type: integer
+          format: int64
+        vendasFechadas:
+          type: integer
+          format: int64
+    
+    # Gravacao
+    CreateGravacaoRequest:
+      type: object
+      required:
+        - idCliente
+      properties:
+        idCliente:
+          type: integer
+          format: int64
+          description: ID do cliente relacionado à gravação
+        statusVenda:
+          type: string
+          enum: [PENDENTE, QUALIFICADO, PROPOSTA_ENVIADA, NEGOCIACAO, FECHADO, PERDIDO]
+          example: PENDENTE
+          description: |
+            Status inicial da venda (opcional):
+            - PENDENTE: Aguardando qualificação
+            - QUALIFICADO: Lead qualificado
+            - PROPOSTA_ENVIADA: Proposta comercial enviada
+            - NEGOCIACAO: Em negociação
+            - FECHADO: Venda concretizada
+            - PERDIDO: Venda perdida
+      description: |
+        **Nota**: O idUsuario não deve ser enviado - é sempre o usuário autenticado.
+    
+    UpdateGravacaoRequest:
+      type: object
+      properties:
+        statusVenda:
+          type: string
+          enum: [PENDENTE, QUALIFICADO, PROPOSTA_ENVIADA, NEGOCIACAO, FECHADO, PERDIDO]
+          example: FECHADO
+          description: |
+            Novo status da venda:
+            - PENDENTE: Aguardando qualificação
+            - QUALIFICADO: Lead qualificado
+            - PROPOSTA_ENVIADA: Proposta comercial enviada
+            - NEGOCIACAO: Em negociação
+            - FECHADO: Venda concretizada
+            - PERDIDO: Venda perdida
+        transcricao:
+          type: string
+          description: Transcrição atualizada (normalmente gerada pela IA)
+        resumoIA:
+          type: string
+          description: Resumo atualizado (normalmente gerado pela IA)
+      description: Todos os campos são opcionais - envie apenas os que deseja atualizar
+    
+    GravacaoCallDTO:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        idUsuario:
+          type: integer
+          format: int64
+        idCliente:
+          type: integer
+          format: int64
+        audioUrl:
+          type: string
+          example: uploads/123/456/audio.mp3
+        audioFilename:
+          type: string
+          example: ligacao_cliente.mp3
+        transcricao:
+          type: string
+          description: Transcrição gerada pela IA
+        resumoIA:
+          type: string
+          description: Resumo da ligação gerado pela IA
+        statusVenda:
+          type: string
+          enum: [PENDENTE, QUALIFICADO, PROPOSTA_ENVIADA, NEGOCIACAO, FECHADO, PERDIDO]
+          description: |
+            Status da negociação:
+            - PENDENTE: Aguardando qualificação
+            - QUALIFICADO: Lead qualificado
+            - PROPOSTA_ENVIADA: Proposta comercial enviada
+            - NEGOCIACAO: Em negociação
+            - FECHADO: Venda concretizada
+            - PERDIDO: Venda perdida
+        statusProcessamento:
+          type: string
+          enum: [UPLOADING, PROCESSANDO, CONCLUIDO, ERRO]
+        duracaoSegundos:
+          type: integer
+        erroProcessamento:
+          type: string
+          nullable: true
+        dataGravacao:
+          type: string
+          format: date-time
+        criadoEm:
+          type: string
+          format: date-time
+        atualizadoEm:
+          type: string
+          format: date-time
+        feedback:
+          $ref: '#/components/schemas/FeedbackIADTO'
+    
+    GravacaoStatusResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        statusProcessamento:
+          type: string
+          enum: [UPLOADING, PROCESSANDO, CONCLUIDO, ERRO]
+        transcricao:
+          type: string
+          nullable: true
+        resumoIA:
+          type: string
+          nullable: true
+        erroProcessamento:
+          type: string
+          nullable: true
+    
+    # Feedback IA
+    FeedbackIADTO:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        idGravacao:
+          type: integer
+          format: int64
+        idEmpresa:
+          type: integer
+          format: int64
+        pontosFortes:
+          type: array
+          items:
+            type: string
+          example:
+            - "Saudação profissional e clara"
+            - "Boa gestão de objeções"
+        pontosFracos:
+          type: array
+          items:
+            type: string
+          example:
+            - "Não perguntou sobre necessidades do cliente"
+        sugestoes:
+          type: array
+          items:
+            type: string
+          example:
+            - "Fazer mais perguntas abertas"
+            - "Ouvir mais atentamente as respostas"
+        sentimentScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Score de sentimento (0-100)
+          example: 75
+        probabilidadeFechamento:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Probabilidade de fechamento em % (0-100)
+          example: 65
+        categoriaAmbiental:
+          type: string
+          enum: [POSITIVO, NEUTRO, NEGATIVO]
+          example: POSITIVO
+        qualidadeAtendimento:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          example: 80
+        aderenciaScript:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          example: 70
+        gestaoObjecoes:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          example: 85
+        objecoesIdentificadas:
+          type: array
+          items:
+            type: string
+          example:
+            - "Preço alto"
+            - "Precisa consultar sócio"
+        momentosChave:
+          type: array
+          items:
+            type: string
+          description: Momentos importantes com timestamp (MM:SS)
+          example:
+            - "01:23 - Cliente demonstrou interesse"
+            - "03:45 - Objeção sobre prazo de entrega"
+        criadoEm:
+          type: string
+          format: date-time
+    
+    # Dashboard
+    EmpresaDashboardResponse:
+      type: object
+      properties:
+        idEmpresa:
+          type: integer
+          format: int64
+        totalGravacoes:
+          type: integer
+          format: int64
+        totalClientes:
+          type: integer
+          format: int64
+        taxaConversao:
+          type: number
+          format: double
+          description: Taxa de conversão em % (0-100)
+          example: 42.5
+    
+    # Common
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Recurso não encontrado
+        status:
+          type: integer
+          format: int64
+          example: 404
+        timestamp:
+          type: string
+          format: date-time
+
